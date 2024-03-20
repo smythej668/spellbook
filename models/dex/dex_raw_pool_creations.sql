@@ -14,13 +14,13 @@
 -- -- about 20 pools on fantom missing because of broken creation_traces table
 -- -- some of the pools on zksync are missing because of broken creation_traces table (known issue, node problems)
 
--- TODO: 
+-- TODO:
 -- -- implement mento pools on celo. it's only 11 of them, but implementation is not trivial, so for now we'll just skip them
 
 
 -- {topic0: params}
 {%
-    set config = {
+    set uniswap_compatible_config = {
         '0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9': {
             'type': 'uniswap_compatible',
             'version': 'v2',
@@ -45,24 +45,98 @@
             'type': 'uniswap_compatible',
             'version': 'v3',
             'pool_position': 45,
+        }
+    }
+%}
+
+
+
+{%
+    set curvefi_compatible_base_config = {
+        '0x52f2db69': {
+            'type': 'curve_compatible',
+            'version': 'Factory V1 Plain',
+            'tokens_position': 4 + 1 + 32 * 2,
+            'tokens_count': 4,
+        },
+        '0xd4b9e214': {
+            'type': 'curve_compatible',
+            'version': 'Factory V1 Plain',
+            'tokens_position': 4 + 1 + 32 * 2,
+            'tokens_count': 4,
+        },
+        '0xcd419bb5': {
+            'type': 'curve_compatible',
+            'version': 'Factory V1 Plain',
+            'tokens_position': 4 + 1 + 32 * 2,
+            'tokens_count': 4,
+        },
+        '0x5c16487b': {
+            'type': 'curve_compatible',
+            'version': 'Factory V1 Plain',
+            'tokens_position': 4 + 1 + 32 * 2,
+            'tokens_count': 4,
+        },
+
+        '0xc955fa04': {
+            'type': 'curve_compatible',
+            'version': 'Factory V2',
+            'tokens_position': 4 + 1 + 32 * 2,
+            'tokens_count': 2,
+        },
+        '0xaa38b385': {
+            'type': 'curve_compatible',
+            'version': 'Factory V2',
+            'tokens_position': 4 + 1 + 32 * 2,
+            'tokens_count': 3,
+        },
+
+        '0x5bcd3d83': {
+            'type': 'curve_compatible',
+            'version': 'Factory V1 Plain Stableswap',
+            'tokens_position': 4 + 1 + 32 * 16,
+            'tokens_count': 8,
+        },
+
+        
+    }
+%}
+
+
+
+-- TODO: implement meta pools logic
+
+{%
+    set curvefi_compatible_meta_config = {
+        '0xde7fe3bf': {
+            'type': 'curve_compatible',
+            'version': 'Factory V2 Meta',
+            'base_pool_position': 4 + 1 + 13,
+            'coin_position': 4 + 1 + 32 * 3 + 13,
+        },
+        '0xe339eb4f': {
+            'type': 'curve_compatible',
+            'version': 'Factory V2 Meta',
+            'base_pool_position': 4 + 1 + 13,
+            'coin_position': 4 + 1 + 32 * 3 + 13,
         },
     }
 %}
 
 
 
-{% 
+{%
     set blockchains = [
-        "ethereum", 
-        "polygon", 
-        "bnb", 
-        "avalanche_c", 
-        "gnosis", 
-        "fantom", 
-        "optimism", 
-        "arbitrum", 
-        "celo", 
-        "base", 
+        "ethereum",
+        "bnb",
+        "polygon",
+        "avalanche_c",
+        "gnosis",
+        "fantom",
+        "optimism",
+        "arbitrum",
+        "celo",
+        "base",
         "zksync",
         "zora",
     ]
@@ -70,17 +144,17 @@
 
 
 
-with 
+with
 
 
-pool_created_logs as (
+uniswap_pool_created_logs as (
     {% for blockchain in blockchains %}
-        {% for topic0, data in config.items() %}
-            select 
+        {% for topic0, data in uniswap_compatible_config.items() %}
+            select
                 '{{ blockchain }}' as blockchain
-                , '{{ data['type'] }}' as type
-                , '{{ data['version'] }}' as version
-                , substr(data, {{ config[topic0]['pool_position'] }}, 20) as pool
+                , '{{ data.type }}' as type
+                , '{{ data.version }}' as version
+                , substr(data, {{ data.pool_position }}, 20) as pool
                 , substr(topic1, 13) as token0
                 , substr(topic2, 13) as token1
                 , block_number
@@ -100,6 +174,68 @@ pool_created_logs as (
 )
 
 
+, curve_base_pool_created_calls as (
+    {% for blockchain in blockchains %}
+        {% for selector, data in curvefi_compatible_base_config.items() %}
+            select
+                '{{ blockchain }}' as blockchain
+                , '{{ data.type }}' as type
+                , '{{ data.version }}' as version
+                , substr(output, 13, 20) as pool
+                , trace_address
+                , transform(sequence(1, 32 * {{ data.tokens_count }}, 32), x -> substr(substr(substr(input, {{ data.tokens_position }}, 32 * {{ data.tokens_count }}), x, 32), 13)) tokens
+                , block_number
+                , block_time
+                , "to" as contract_address
+                , tx_hash
+            from {{ source(blockchain, 'traces') }}
+            where 
+                substr(input, 1, 4) = {{ selector }} 
+                and length(output) = 32
+                and success 
+                and tx_success 
+            {% if not loop.last %}
+                union all
+            {% endif %}
+        {% endfor %}
+        {% if not loop.last %}
+            union all
+        {% endif %}
+    {% endfor %}
+)
+
+-- will be included later
+, curve_meta_pool_created_calls as (
+    {% for blockchain in blockchains %}
+        {% for selector, data in curvefi_compatible_meta_config.items() %}
+            select
+                '{{ blockchain }}' as blockchain
+                , '{{ data.type }}' as type
+                , '{{ data.version }}' as version
+                , substr(output, 13, 20) as pool
+                , trace_address
+                , substr(input, {{ data.base_pool_position }}, 20) as base_pool
+                , substr(input, {{ data.coin_position }}, 20) as coin
+                , block_number
+                , block_time
+                , "to" as contract_address
+                , tx_hash
+            from {{ source(blockchain, 'traces') }}
+            where 
+                substr(input, 1, 4) = {{ selector }} 
+                and length(output) = 32
+                and success 
+                and tx_success 
+            {% if not loop.last %}
+                union all
+            {% endif %}
+        {% endfor %}
+        {% if not loop.last %}
+            union all
+        {% endif %}
+    {% endfor %}
+)
+
 , creation_traces as (
     {% for blockchain in blockchains %}
         select
@@ -117,14 +253,15 @@ pool_created_logs as (
 
 
 -- hardcoded OP legacy pools
-, _optimism_ovm1_legacy as (
-    select 
+, _uniswap_optimism_ovm1_legacy as (
+    select
         'optimism' as blockchain
         , 'uniswap_compatible' as type
         , 'v3' as version
         , pool
         , token0
-        , token1 
+        , token1
+        , array[token0, token1] as tokens
         , creation_block_time
         , creation_block_number
         , contract_address
@@ -135,24 +272,67 @@ pool_created_logs as (
     )
 )
 
+, pool_created_logs as (
+    select 
+        blockchain
+        , type
+        , version
+        , pool
+        , token0
+        , token1
+        , array[token0, token1] as tokens
+        , block_time
+        , block_number
+        , contract_address
+        , tx_hash
+    from uniswap_pool_created_logs
+
+    union all
+    
+    select 
+        blockchain
+        , type
+        , version
+        , pool
+        , tokens[1] as token0
+        , tokens[2] as token1
+        , tokens
+        , block_time
+        , block_number
+        , contract_address
+        , tx_hash
+    from curve_base_pool_created_calls
+)
 
 
-select 
-    blockchain
-    , type
-    , version
-    , pool
-    , token0
-    , token1
-    , block_time as creation_block_time
-    , block_number as creation_block_number
-    , contract_address
-from pool_created_logs
-join creation_traces using(blockchain, tx_hash, block_number, block_time, pool)
-{% if is_incremental() %}
-    where {{ incremental_predicate('block_time') }}
-{% endif %} 
+, t as (
+    select
+        blockchain
+        , type
+        , version
+        , pool
+        , token0
+        , token1
+        , tokens
+        , block_time as creation_block_time
+        , block_number as creation_block_number
+        , contract_address
+    from pool_created_logs
+    join creation_traces using(blockchain, tx_hash, block_number, block_time, pool)
+    {% if is_incremental() %}
+        where {{ incremental_predicate('block_time') }}
+    {% endif %}
 
-union all
+    union all
 
-select * from _optimism_ovm1_legacy
+    select * from _uniswap_optimism_ovm1_legacy
+)
+
+
+select * from (
+    select 
+        *
+        , row_number() over(partition by blockchain, pool order by creation_block_time, contract_address) as rn
+    from t
+)
+where rn = 1 -- remove duplicates // rare case, shitcoins only

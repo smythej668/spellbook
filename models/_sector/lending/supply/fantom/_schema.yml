@@ -95,17 +95,42 @@ models:
             - token_address
             - tx_hash
             - evt_index
-      - check_seed:
+      - check_lending_base_supply_seed:
           seed_file: ref('aave_fantom_base_supply_seed')
-          match_columns:
+    columns:
+      - *blockchain
+      - *project
+      - *version
+      - *transaction_type
+      - *token_address
+      - *depositor
+      - *withdrawn_to
+      - *liquidator
+      - *amount
+      - *block_month
+      - *block_time
+      - *block_number
+      - *tx_hash
+      - *evt_index
+
+  - name: granary_fantom_base_supply
+    meta:
+      blockchain: fantom
+      sector: lending
+      project: granary
+      contributors: tomfutago
+    config:
+      tags: ['lending', 'supply', 'aave', 'granary', 'fantom']
+    description: "Granary supply transactions on Fantom"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
             - transaction_type
             - token_address
             - tx_hash
             - evt_index
-          check_columns:
-            - block_number
-            - depositor
-            - amount
+      - check_lending_base_supply_seed:
+          seed_file: ref('granary_fantom_base_supply_seed')
     columns:
       - *blockchain
       - *project
